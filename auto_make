@@ -1,0 +1,172 @@
+#!/bin/bash
+#===============================================================================
+# Automatic Simulation and Reports Collection Script
+#===============================================================================
+# Note: This script is made for labs of ECE5745 - Complex ASIC Design. It is 
+#       painful to run simulation, change Makefrag file, and get results from
+#       different folders. So I wrote this script. It can:
+#       1. Automatically run simulation to generate verilog and vcd file;
+#       2. Automatically change Makefrag file based on inputs;
+#       3. Automatically run make process and collect required results.
+#       You are more than welcome to ditribute this script to other classmates,
+#       if you find it useful, just buy me a beer.
+#
+# Author: Wancheng Zhou
+
+disp_help()
+{
+  cat <<-HELP
+    Automatic Simulation and Report Collection Tool (Wancheng Zhou @ 2/27/2015 8:45 AM)
+    
+    usage: auto_make [options]
+
+    arguments:
+
+    --impl            depends on specific lab design
+    --nstages         depends on specific lab design, may not exist
+    --input <dataset> dataset type for simulation
+    --clk-limit       clock constraints
+    --design-level    {alt, base}
+    --lab-topic       depends on specific lab design. For our first lab, it
+                      should be "imul"
+    --lab-index       which lab is this? lab1? lab2?
+    --help            display message above
+    
+HELP
+  exit 0
+}
+
+
+OPTIONS=$(getopt -o I:N:D:C:L:T:H:\
+                 -l impl:,nstages:,input:,clk-limit:,design-level:,lab-topic:,lab-index:,help,\
+                 -- "$@")
+
+if [ $? -ne 0 ]; then
+  echo "getopt error"
+  exit 1
+fi
+
+eval set -- $OPTIONS
+
+
+# Parse input parameters
+
+while true; do 
+  case "$1" in
+    -I|--impl         )   IMPL="$2"; shift;;
+    -N|--nstages      )   NSTG="$2"; shift;;
+    -D|--input        )   INPT="$2"; shift;;
+    -C|--clk-limit    )   CLKL="$2"; shift;;
+    -L|--design-level )   DLVL="$2"; shift;;
+    -T|--lab-topic    )   TOPC="$2"; shift;;
+    -N|--lab-index    )   INDX="$2"; shift;;
+    -H|--help         )   disp_help; shift;;
+    --                )       shift; break;;
+  esac
+shift
+done
+
+echo "Implementaion:"${IMPL}
+echo "Number of stages:"${NSTG}
+echo "Input Dataset:"${INPT}
+
+# Store parameters into intuitive variables
+
+IMPL_TYPE=${IMPL}
+INPUT_DATASET=${INPT}
+NSTAGES=${NSTG}
+CLOCK_CONSTRANT=${CLKL}
+DESIGN_LEVEL=${DLVL}
+LAB_TOPIC=${TOPC}
+LAB_INDEX=${INDX}
+
+# Please change these following path based on your group and folder
+
+COURSE_PATH="${HOME}/ece5745"
+GROUPS_NAME="lab1-group03"
+
+
+REPORT_PATH="${COURSE_PATH}/${GROUPS_NAME}/results/${LAB_TOPIC}-${DESIGN_LEVEL}-${IMPL_TYPE}"
+REPORT_PREFIX="${NSTAGES}_stage_${INPUT_DATASET}_${CLOCK_CONSTRANT}"
+
+echo "Reports will be stored into:"${REPORT_PATH}
+
+# Enter "sim" folder firstly
+
+cd ${COURSE_PATH}/${GROUPS_NAME}/sim
+
+if [ ! -d "build" ]; then
+  echo "build folder doesn't exist"
+  mkdir build
+else
+  echo "build folder exists, erase all!"
+  cd build
+  rm -rf *
+fi
+
+# Run Synthesis
+
+echo "Run command!"
+../${LAB_INDEX}-${LAB_TOPIC}/${LAB_TOPIC}-sim --impl ${IMPL_TYPE} --input ${INPUT_DATASET} --nstages ${NSTAGES} --translate --dump-vcd
+find ./ -name "*RTL*.v" -print
+
+# Get file names for Makefrag in asic folder
+
+VERILOG_FILENAME=$(find ./ -name "*RTL*.v" -type f -printf "%f\n")
+echo "Verilog File Name is:" ${VERILOG_FILENAME}
+VCD_FILENAME=$(find ./ -name "*verilator*.vcd" -type f -printf "%f\n")
+echo "VCD file name is:" ${VCD_FILENAME}
+
+# Enter "asic" folder
+
+echo "Changing Makefrag file..."
+cd ${COURSE_PATH}/${GROUPS_NAME}/asic
+cp Makefrag Makefrag.bak
+sed -i -r "s/\s([0-9]+)\.([0-9])/ ${CLOCK_CONSTRANT}/" Makefrag
+sed -i -r "s/(vsrc = ).*/vsrc = ${VERILOG_FILENAME}/g" Makefrag
+sed -i -r "s/(vcd = ).*/vcd = ${VCD_FILENAME}/g" Makefrag
+
+echo "Make Process begin..."
+make
+
+echo "Make finished, now begin to copy results"
+
+# Check Target Path
+
+cd ${COURSE_PATH}/${GROUPS_NAME}
+
+if [ ! -d "results" ]; then
+  echo "result folder doesn't exist, create..."
+  mkdir results
+fi
+
+cd results
+
+if [ ! -d ${LAB_TOPIC}-${DESIGN_LEVEL}-${IMPL_TYPE} ]; then
+  echo "Target folder doesn't exist, create..."
+  mkdir ${LAB_TOPIC}-${DESIGN_LEVEL}-${IMPL_TYPE}
+fi
+
+# Enter ASIC folder to collect results
+
+cd ${COURSE_PATH}/${GROUPS_NAME}/asic
+
+cp icc-par/current-icc/reports/chip_finish_icc.area.rpt \
+  ${REPORT_PATH}/chip_finish_icc_area_report_${REPORT_PREFIX}.txt
+
+cp icc-par/current-icc/reports/chip_finish_icc.timing.rpt \
+  ${REPORT_PATH}/chip_finish_icc_timing_report_${REPORT_PREFIX}.txt
+
+cp pt-pwr/current-pt/reports/pt-pwr.power.avg.max.report \
+  ${REPORT_PATH}/pt-pwr_report_avg_max_${REPORT_PREFIX}.txt
+
+cp pt-pwr/current-pt/reports/summary.txt \
+  ${REPORT_PATH}/summary_${REPORT_PREFIX}.txt
+
+echo "Finished!"
+
+
+
+
+
+
